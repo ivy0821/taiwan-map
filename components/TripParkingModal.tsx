@@ -270,11 +270,6 @@ export default function TripParkingModal({ isOpen, onClose, schedule }: ModalPro
                         </button>
                       </div>
 
-                      <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded text-[11px] text-amber-200/90 flex items-start gap-1.5 leading-tight">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                        <span>資料取自政府即時端點，車況有時差僅供參考。</span>
-                      </div>
-
                       {/* 車位資訊 */}
                       <div className="grid grid-cols-2 gap-2 mt-3 text-center py-2 bg-slate-900/60 rounded-lg border border-slate-700/60">
                         <div>
