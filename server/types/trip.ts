@@ -50,6 +50,30 @@ export interface NewTripNode {
 
 // ─────────────────────────────────────────── service 層對外的 use case 結果
 
+/**
+ * 這個景點（POI）的來源。
+ *
+ * 目前 ai-plan-with-parking 的景點一律由呼叫端在 request 中提供，
+ * 不是 Google Places / Nominatim / TDX 產生的 POI，因此只有 'user' 一種值。
+ * 未來真的出現其他來源時再擴充，不預先放沒在用的列舉值。
+ */
+export type ScheduleSource = 'user';
+
+/**
+ * 景點的「來源可信度」（source confidence），值域 0~1。
+ *
+ * ⚠ 語意務必分清楚：
+ *   這是「這個 POI 的來源有多可靠」，
+ *   **不是**「Gemini 對這個行程推薦有多少信心」，
+ *   也**不是** LLM calibrated confidence。
+ *
+ * source === 'user' → 1
+ *   因為這個景點不是模型猜出來的，而是使用者明確提供的原始 POI，
+ *   座標與名稱都原封不動沿用（Stage 3 已保證 AI 無法改寫座標），
+ *   所以「來源」這件事本身是最高等級的可靠，沒有任何推測成分。
+ */
+export type ScheduleConfidence = number;
+
 /** ai-plan-with-parking 的 schedule 一筆（欄位名即既有 API contract） */
 export interface ScheduleEntry {
   spot_order: number;
@@ -59,6 +83,18 @@ export interface ScheduleEntry {
   suggested_stay_minutes: number;
   reason: string;
   candidate_parkings: CandidateParking[];
+
+  // ── M9 新增欄位（additive，舊 client 可忽略）────────────────────────────
+  /**
+   * 從「最近的候選停車場」走到景點的分鐘數。
+   * 與 candidate_parkings[0].distance_display 使用同一個計算來源。
+   * 該景點 1.5km 內沒有停車場時為 null。
+   */
+  walk_minutes_to_spot: number | null;
+  /** 這個景點（POI）的來源，見 ScheduleSource */
+  source: ScheduleSource;
+  /** 見 ScheduleConfidence */
+  confidence: ScheduleConfidence;
 }
 
 export interface TripPlanWithParking {

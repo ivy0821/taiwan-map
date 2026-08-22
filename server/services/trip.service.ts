@@ -20,6 +20,7 @@ import {
   findNearestParkingForPlace,
   getCandidateParkingsForPlaces,
   getLiveAvailabilityMap,
+  walkingMinutesFor,
 } from '@/server/services/parking.service';
 import type {
   GeneratedTrip,
@@ -27,6 +28,8 @@ import type {
   InsertParkingNode,
   InsertParkingResult,
   PlaceInput,
+  ScheduleConfidence,
+  ScheduleSource,
   TripNodeRow,
   TripPlanWithParking,
 } from '@/server/types/trip';
@@ -82,15 +85,30 @@ export async function planTripWithParking(
     itinerary_flow: plan.stops
       .map((stop) => `${stop.sequenceOrder}. ${stop.poi.name}`)
       .join(' ➔ '),
-    schedule: plan.stops.map((stop, index) => ({
-      spot_order: stop.sequenceOrder,
-      spot_name: stop.poi.name,
-      lat: stop.poi.lat,
-      lng: stop.poi.lng,
-      suggested_stay_minutes: stop.stayDurationMinutes,
-      reason: stop.summary,
-      candidate_parkings: candidatesPerPlace[index] ?? [],
-    })),
+    schedule: plan.stops.map((stop, index) => {
+      const candidates = candidatesPerPlace[index] ?? [];
+      // 候選停車場依距離遞增排序，第一個就是最近的那個
+      const nearest = candidates[0];
+
+      return {
+        spot_order: stop.sequenceOrder,
+        spot_name: stop.poi.name,
+        lat: stop.poi.lat,
+        lng: stop.poi.lng,
+        suggested_stay_minutes: stop.stayDurationMinutes,
+        reason: stop.summary,
+        candidate_parkings: candidates,
+
+        // M9：由最近停車場的距離換算，與 distance_display 共用同一個計算函式
+        walk_minutes_to_spot: nearest ? walkingMinutesFor(nearest.distance_meters) : null,
+
+        // 這個景點是呼叫端在 request 裡直接提供的原始 POI
+        source: 'user' as ScheduleSource,
+        // 「來源」可信度 = 1：POI 由使用者明確提供，不是模型猜出來的。
+        // 這【不是】AI 對推薦內容的信心分數。
+        confidence: 1 as ScheduleConfidence,
+      };
+    }),
   };
 }
 

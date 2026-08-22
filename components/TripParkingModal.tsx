@@ -18,6 +18,8 @@ import {
   AlertCircle
 } from 'lucide-react';
 
+import { confidenceLabel, sourceLabel } from './scheduleLabels';
+
 const RelativeMiniMap = dynamic(() => import('./RelativeMiniMap'), {
   ssr: false,
   loading: () => (
@@ -44,15 +46,28 @@ export interface ScheduleNode {
   lat: number;
   lng: number;
   suggested_stay_minutes: number;
-  arrival_time: string;
-  departure_time: string;
-  open_time: string;
-  close_time: string;
   reason: string;
-  source: string;
-  confidence: string;
-  parking_arrival_time: string;
-  walk_minutes_to_spot: number;
+
+  // ── 後端會提供的欄位（與 server/types/trip.ts 的 ScheduleEntry 一致）──
+  /** 從最近候選停車場走到景點的分鐘數；1.5km 內沒有停車場時為 null */
+  walk_minutes_to_spot: number | null;
+  /** 這個景點的來源（目前只有 'user'：由使用者提供的原始 POI） */
+  source: 'user';
+  /**
+   * 「來源可信度」0~1 —— 指這個 POI 的來源有多可靠，
+   * 不是 AI 對推薦內容的信心分數。使用者直接提供 → 1。
+   */
+  confidence: number;
+
+  // ── 後端目前沒有可靠資料來源，因此為選擇性 ──────────────────────────
+  // arrival/departure/parking_arrival 需要「出發時間 + 景點間車程」，
+  // open/close 需要景點營業時間資料集，兩者系統目前都沒有。
+  // 這些欄位缺值時，下方 UI 會整塊不顯示，而不是印出 undefined。
+  arrival_time?: string;
+  departure_time?: string;
+  open_time?: string;
+  close_time?: string;
+  parking_arrival_time?: string;
   candidate_parkings: Array<{
     parking_id: string;
     name: string;
@@ -211,12 +226,15 @@ export default function TripParkingModal({
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-rose-400">站點 #{currentSpot.spot_order}</span>
                     <h3 className="text-lg font-bold text-white">{currentSpot.spot_name}</h3>
-                    <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" /> 可信度：{currentSpot.confidence}
-                    </span>
+                    {confidenceLabel(currentSpot.confidence) && (
+                      <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3" /> 可信度：{confidenceLabel(currentSpot.confidence)}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
-                    推薦理由：{currentSpot.reason}（來源：{currentSpot.source}）
+                    推薦理由：{currentSpot.reason}
+                    {sourceLabel(currentSpot.source) && <>（來源：{sourceLabel(currentSpot.source)}）</>}
                   </p>
                 </div>
               </div>
@@ -241,17 +259,25 @@ export default function TripParkingModal({
 
             {/* 時間流動：停車 ➔ 步行 ➔ 景點時間軸 */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-700/60 text-xs">
-              <div className="flex items-center gap-2 text-slate-300 bg-slate-900/40 p-2 rounded-lg">
-                <Car className="w-4 h-4 text-amber-400" />
-                <span>預計抵達停車場：<b className="text-amber-300">{currentSpot.parking_arrival_time}</b></span>
-              </div>
-              <div className="flex items-center gap-2 text-slate-300 bg-slate-900/40 p-2 rounded-lg">
-                <Footprints className="w-4 h-4 text-indigo-400" />
-                <span>步行至景點：約 <b className="text-indigo-300">{currentSpot.walk_minutes_to_spot} 分鐘</b></span>
-              </div>
+              {currentSpot.parking_arrival_time && (
+                <div className="flex items-center gap-2 text-slate-300 bg-slate-900/40 p-2 rounded-lg">
+                  <Car className="w-4 h-4 text-amber-400" />
+                  <span>預計抵達停車場：<b className="text-amber-300">{currentSpot.parking_arrival_time}</b></span>
+                </div>
+              )}
+              {currentSpot.walk_minutes_to_spot != null && (
+                <div className="flex items-center gap-2 text-slate-300 bg-slate-900/40 p-2 rounded-lg">
+                  <Footprints className="w-4 h-4 text-indigo-400" />
+                  <span>步行至景點：約 <b className="text-indigo-300">{currentSpot.walk_minutes_to_spot} 分鐘</b></span>
+                </div>
+              )}
               <div className="flex items-center gap-2 text-slate-300 bg-slate-900/40 p-2 rounded-lg">
                 <Clock className="w-4 h-4 text-emerald-400" />
-                <span>景點參觀時段：<b className="text-emerald-300">{currentSpot.arrival_time} ~ {currentSpot.departure_time}</b> ({currentSpot.suggested_stay_minutes}分)</span>
+                {currentSpot.arrival_time && currentSpot.departure_time ? (
+                  <span>景點參觀時段：<b className="text-emerald-300">{currentSpot.arrival_time} ~ {currentSpot.departure_time}</b> ({currentSpot.suggested_stay_minutes}分)</span>
+                ) : (
+                  <span>建議停留：<b className="text-emerald-300">{currentSpot.suggested_stay_minutes} 分鐘</b></span>
+                )}
               </div>
             </div>
           </div>

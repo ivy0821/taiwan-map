@@ -37,6 +37,17 @@ const defaultDeps: ParkingServiceDeps = { findNearbyParking, getParkingAvailabil
 
 // ────────────────────────────────────────────────────────────── domain 計算
 
+/**
+ * 從停車場走到景點所需的分鐘數。
+ *
+ * 這是「步行時間」的**唯一**計算來源：`distance_display` 的文字與
+ * schedule 的 `walk_minutes_to_spot` 都必須呼叫這個函式，
+ * 兩邊才不會各算一套而漂移。
+ */
+export function walkingMinutesFor(distanceMeters: number): number {
+  return Math.ceil(distanceMeters / WALKING_SPEED_M_PER_MIN);
+}
+
 /** 把一筆 DB 快取資料與（可能有的）即時車位合併成對外的候選停車場 */
 export function toCandidateParking(
   parking: NearbyParking,
@@ -49,7 +60,7 @@ export function toCandidateParking(
       : parking.available_spaces;
 
   const distKm = (parking.distance_meters / 1000).toFixed(2);
-  const walkingMin = Math.ceil(parking.distance_meters / WALKING_SPEED_M_PER_MIN);
+  const walkingMin = walkingMinutesFor(parking.distance_meters);
 
   return {
     parking_id: parking.parking_id,
