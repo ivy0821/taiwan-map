@@ -48,7 +48,7 @@ async function fetchKaohsiungLiveAvailability(token) {
     if (!res.ok) return [];
     const data = await res.json();
     return data.ParkingAvailabilities || (Array.isArray(data) ? data : []);
-  } catch (e) {
+  } catch {
     return [];
   }
 }

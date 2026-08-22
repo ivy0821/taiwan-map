@@ -1,65 +1,44 @@
 // app/api/v1/parking/live/route.ts
 import { NextResponse } from 'next/server';
-
-async function getTDXToken() {
-  const params = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: process.env.TDX_CLIENT_ID || '',
-    client_secret: process.env.TDX_CLIENT_SECRET || '',
-  });
-
-  const res = await fetch('https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params,
-  });
-
-  if (!res.ok) throw new Error('無法取得 TDX Token');
-  const data = await res.json();
-  return data.access_token;
-}
+import { getLiveAvailability } from '@/server/services/parking.service';
+import {
+  parseParkingLiveRequest,
+  readJsonBody,
+  ValidationError,
+} from '@/server/api/validation';
+import { logServerError } from '@/server/api/errors';
 
 export async function POST(req: Request) {
   try {
-    const { parkingIds } = await req.json(); // 傳入 ['CarParkID_1', 'CarParkID_2']
+    const { parkingIds } = parseParkingLiveRequest(await readJsonBody(req));
 
-    if (!Array.isArray(parkingIds) || parkingIds.length === 0) {
+    // 空陣列是合法輸入，直接回空結果，不打 TDX（既有行為）
+    if (parkingIds.length === 0) {
       return NextResponse.json({ availabilities: {} });
     }
 
-    const token = await getTDXToken();
+    const { availabilities, upstreamOk } = await getLiveAvailability(parkingIds);
 
-    // 建立 OData filter：ParkingID eq 'A' or ParkingID eq 'B'
-    const filterQuery = parkingIds.map((id) => `ParkingID eq '${id}'`).join(' or ');
-    const url = `https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/ParkingAvailability/City/Kaohsiung?$filter=${encodeURIComponent(
-      filterQuery
-    )}&$format=JSON`;
-
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store', // 確保每次都不走快取
-    });
-
-    if (!res.ok) {
+    if (!upstreamOk) {
+      // 維持既有行為：上游失敗仍回 200 + 空資料，且不附 updated_at
+      // （M2：上游失敗回 200 是 Stage 2 明確定義的 fallback，本階段刻意不動）
       return NextResponse.json({ availabilities: {} });
-    }
-
-    const data = await res.json();
-    const list = data.ParkingAvailabilities || (Array.isArray(data) ? data : []);
-
-    const availabilitiesMap: Record<string, number | null> = {};
-    for (const item of list) {
-      const id = item.ParkingID || item.CarParkID;
-      if (id) {
-        availabilitiesMap[id] = item.AvailableSpaces ?? null;
-      }
     }
 
     return NextResponse.json({
-      availabilities: availabilitiesMap,
+      availabilities,
       updated_at: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message, availabilities: {} }, { status: 500 });
+  } catch (error: unknown) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message, availabilities: {} }, { status: 400 });
+    }
+    // 注意：TDX 上游失敗有自己的 fallback（200 + 空資料，見上方 upstreamOk），
+    // 走到這裡的是真正非預期的錯誤。
+    logServerError('parking/live', error);
+    return NextResponse.json(
+      { error: '取得即時車位失敗', availabilities: {} },
+      { status: 500 }
+    );
   }
 }

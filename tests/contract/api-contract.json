@@ -1,0 +1,247 @@
+{
+  "_about": [
+    "重構前錄下的 API contract 快照（Stage 0 安全網）。",
+    "每個 stage 完成後執行 `npm run contract` 比對，確保 request/response 形狀沒有改變。",
+    "shape 語法：",
+    "  \"string\" / \"number\" / \"boolean\" / \"null\" / \"object\" / \"array\" / \"any\"，可用 | 組成聯集",
+    "  [shape]        → 陣列，每個元素都要符合 shape",
+    "  { \"k\": shape } → 物件；key 結尾加 ? 表示可選；key \"*\" 表示其餘所有值都要符合",
+    "expectStatus   → 只有這些狀態碼算成功；其餘即使形狀符合也視為失敗。",
+    "requireNonEmpty → 成功時這些路徑必須「至少有一個非空值」，用來擋掉",
+    "                  「形狀對但資料全空」的假綠燈。`[*]` 表示展開陣列。"
+  ],
+  "baseUrl": "http://localhost:3000",
+  "endpoints": [
+    {
+      "id": "import-google-maps",
+      "method": "POST",
+      "path": "/api/v1/import/google-maps",
+      "calledBy": "（目前無前端呼叫）",
+      "writesDatabase": false,
+      "callsExternalApi": "Nominatim / Google Maps",
+      "request": { "raw_input": "駁二藝術特區" },
+      "expectStatus": [200],
+      "requireNonEmpty": ["$.parsed_pois"],
+      "responses": {
+        "200": {
+          "parsed_pois": [
+            {
+              "poi_name": "string",
+              "lat": "number",
+              "lng": "number",
+              "matched": "boolean"
+            }
+          ]
+        },
+        "400": { "error": "string" },
+        "500": { "error": "string" }
+      },
+      "notes": [
+        "查無結果時仍回 200 且 parsed_pois 為空陣列 —— 但那代表 geocoding 壞了，",
+        "所以 requireNonEmpty 會把它判為失敗（Nominatim 被限流時也會紅，屬預期行為）。",
+        "matched 目前永遠是 true（L2）。"
+      ]
+    },
+    {
+      "id": "parking-live",
+      "method": "POST",
+      "path": "/api/v1/parking/live",
+      "calledBy": "components/TripParkingModal.tsx",
+      "writesDatabase": false,
+      "callsExternalApi": "TDX",
+      "request": { "parkingIds": ["KHA00001", "KHA00002", "KHA00003"] },
+      "expectStatus": [200],
+      "requireNonEmpty": ["$.availabilities"],
+      "responses": {
+        "200": {
+          "availabilities": { "*": "number|null" },
+          "updated_at?": "string"
+        },
+        "400": {
+          "error": "string",
+          "availabilities": "object"
+        },
+        "500": {
+          "error": "string",
+          "availabilities": "object"
+        }
+      },
+      "notes": [
+        "parkingIds 使用 parking_lots_cache 中 has_dynamic_data = true 的真實 ID",
+        "（KHA00001~3 確實存在於 TDX 即時車位 feed 中）。",
+        "Stage 2 已修正 OData filter：ParkingID → CarParkID，這個 endpoint 現在真的會回資料，",
+        "所以重新啟用 requireNonEmpty，避免 wildcard 形狀又變成沒被驗證過。",
+        "⚠ TDX 每分鐘只允許 5 次請求。若短時間內重複執行 contract，這一條會因為 429 而",
+        "   回 200 + 空 availabilities，進而被 requireNonEmpty 判為 FAIL —— 那是額度問題，",
+        "   等一分鐘再跑即可。",
+        "TDX 對「無即時資料」的停車場會回 AvailableSpaces = -1，後端原樣傳遞不改寫語意，",
+        "   所以值域是 number|null 且可能為負數。"
+      ]
+    },
+    {
+      "id": "parking-live-empty",
+      "method": "POST",
+      "path": "/api/v1/parking/live",
+      "calledBy": "components/TripParkingModal.tsx",
+      "writesDatabase": false,
+      "callsExternalApi": "無（提前 return）",
+      "request": { "parkingIds": [] },
+      "expectStatus": [200],
+      "responses": {
+        "200": { "availabilities": "object" }
+      },
+      "notes": [
+        "空輸入的提前 return 路徑，不會呼叫 TDX。",
+        "這一條刻意不設 requireNonEmpty —— 空的 availabilities 就是正確結果。"
+      ]
+    },
+    {
+      "id": "trip-generate",
+      "method": "POST",
+      "path": "/api/v1/trip/generate",
+      "calledBy": "（目前無前端呼叫）",
+      "writesDatabase": true,
+      "callsExternalApi": "Gemini",
+      "request": {
+        "prompt": "輕鬆高雄一日遊",
+        "poi_list": [
+          { "poi_name": "駁二藝術特區", "lat": 22.6201, "lng": 120.2818 },
+          { "poi_name": "高雄流行音樂中心", "lat": 22.6133, "lng": 120.2925 }
+        ]
+      },
+      "expectStatus": [200],
+      "requireNonEmpty": ["$.nodes"],
+      "responses": {
+        "200": {
+          "trip_id": "string",
+          "title": "string",
+          "nodes": [
+            {
+              "sequence_order": "number",
+              "node_type": "string",
+              "poi_name": "string",
+              "stay_duration_minutes": "number",
+              "lat": "number",
+              "lng": "number",
+              "summary": "string"
+            }
+          ]
+        },
+        "400": { "error": "string" },
+        "500": { "error": "string" }
+      },
+      "notes": [
+        "⚠ 會寫入 trips 與 trip_nodes，預設不執行（需加 --include-writes）。",
+        "trips.trip_id 是 uuid，node-pg 以字串回傳。",
+        "nodes 直接回傳 lib/aiPlanner.ts 的 structured output，欄位由 responseSchema 的 required 保證。",
+        "500 目前直接回傳 error.message（H3，待後續 stage 修正）。"
+      ]
+    },
+    {
+      "id": "trip-ai-plan-with-parking",
+      "method": "POST",
+      "path": "/api/v1/trip/ai-plan-with-parking",
+      "calledBy": "app/page.tsx",
+      "writesDatabase": false,
+      "callsExternalApi": "Gemini + TDX",
+      "request": {
+        "places": [
+          { "name": "駁二藝術特區", "lat": 22.6201, "lng": 120.2818 },
+          { "name": "高雄流行音樂中心", "lat": 22.6133, "lng": 120.2925 },
+          { "name": "旗津天后宮", "lat": 22.6137, "lng": 120.2678 }
+        ]
+      },
+      "expectStatus": [200],
+      "requireNonEmpty": ["$.schedule", "$.schedule[*].candidate_parkings"],
+      "responses": {
+        "200": {
+          "success": "boolean",
+          "itinerary_flow": "string",
+          "schedule": [
+            {
+              "spot_order": "number|string",
+              "spot_name": "string",
+              "lat": "number|string",
+              "lng": "number|string",
+              "suggested_stay_minutes?": "number|string",
+              "reason?": "string",
+              "candidate_parkings": [
+                {
+                  "parking_id": "string",
+                  "name": "string",
+                  "lat": "number",
+                  "lng": "number",
+                  "total_spaces": "number|string|null",
+                  "available_spaces": "number|string|null",
+                  "distance_meters": "number",
+                  "distance_display": "string",
+                  "hourly_rate": "string",
+                  "fare_description": "string"
+                }
+              ]
+            }
+          ]
+        },
+        "400": { "error": "string" },
+        "500": { "error": "string" }
+      },
+      "notes": [
+        "spot_order / spot_name / lat / lng / suggested_stay_minutes / reason 全部是 Gemini 的",
+        "原始輸出，這個 route 沒有 responseSchema 也沒有驗證（H1），所以數值欄位一律",
+        "接受 number|string，避免模型偶爾回字串就誤報。等 zod 進來後再收緊。",
+        "單一景點的 candidate_parkings 可能為空（1.5km 內真的沒停車場），",
+        "所以 requireNonEmpty 用 [*] 語意：只要有一個景點找得到停車場就算過。",
+        "前端 ScheduleNode 另外宣告了 arrival_time / confidence 等 8 個欄位，後端從未產生（M9，本次不處理）。",
+        "⚠ 這一條會消耗 Gemini 額度。免費方案 gemini-2.5-flash 每天只有 20 次",
+        "   （quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier）。額度用完時",
+        "   route 會回 500 {error:'規劃失敗', details:'...RESOURCE_EXHAUSTED...'}，",
+        "   contract 會判為 FAIL —— 這是額度問題不是 contract 問題，看 details 即可分辨。"
+      ]
+    },
+    {
+      "id": "trip-insert-parking",
+      "method": "POST",
+      "path": "/api/v1/trip/{tripId}/insert-parking",
+      "calledBy": "（目前無前端呼叫）",
+      "writesDatabase": true,
+      "callsExternalApi": "TDX",
+      "requiresEnv": "CONTRACT_TRIP_ID",
+      "request": {},
+      "expectStatus": [200],
+      "requireNonEmpty": ["$.nodes"],
+      "responses": {
+        "200": {
+          "success": "boolean",
+          "trip_id": "string",
+          "total_nodes": "number",
+          "nodes": [
+            {
+              "poi_name": "string",
+              "lat": "number",
+              "lng": "number",
+              "node_type": "string",
+              "sequence_order": "number",
+              "node_id?": "number|string",
+              "trip_id?": "string",
+              "total_spaces?": "number|string|null",
+              "available_spaces?": "number|string|null",
+              "distance_meters?": "number"
+            }
+          ]
+        },
+        "400": { "error": "string" },
+        "404": { "error": "string" },
+        "500": { "error": "string" }
+      },
+      "notes": [
+        "⚠ 會 DELETE 再重新 INSERT trip_nodes，預設不執行（需加 --include-writes）。",
+        "⚠ 在 C1/C2 修好之前，重複執行會增生停車節點並清掉 stay_duration_minutes / summary，",
+        "   請只對可拋棄的 trip 使用。",
+        "expectStatus 刻意只留 200：若 CONTRACT_TRIP_ID 指到不存在或已清空的 trip，",
+        "會回 404，那代表這次根本沒驗證到交易路徑，必須是紅燈而不是綠燈。",
+        "nodes 陣列混了兩種形狀（停車場節點有 total_spaces/distance_meters 但沒有 node_id，",
+        "景點節點相反，M4），這裡以「必要欄位 + 可選欄位」的聯集表示。"
+      ]
+    }
+  ]
+}

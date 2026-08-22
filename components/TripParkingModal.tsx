@@ -3,7 +3,20 @@
 
 import React, { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { AlertTriangle, Navigation, X, ArrowRight, Car, Compass, MapPin, RefreshCw, ExternalLink } from 'lucide-react';
+import {
+  AlertTriangle,
+  Navigation,
+  X,
+  ArrowRight,
+  Car,
+  Compass,
+  MapPin,
+  RefreshCw,
+  Clock,
+  ShieldCheck,
+  Footprints,
+  AlertCircle
+} from 'lucide-react';
 
 const RelativeMiniMap = dynamic(() => import('./RelativeMiniMap'), {
   ssr: false,
@@ -14,7 +27,6 @@ const RelativeMiniMap = dynamic(() => import('./RelativeMiniMap'), {
   ),
 });
 
-// 錯別字清洗
 function cleanParkingName(name: string): string {
   if (!name) return '停車場';
   return name
@@ -23,42 +35,54 @@ function cleanParkingName(name: string): string {
     .replace(/哨船/g, '哨船頭')
     .replace(/台南/g, '臺南')
     .replace(/台北/g, '臺北')
-    .replace(/台中/g, '臺中')
-    .replace(/台東/g, '臺東')
     .trim();
 }
 
-interface ParkingItem {
-  parking_id: string;
-  name: string;
-  lat: number;
-  lng: number;
-  total_spaces: number;
-  available_spaces: number | null;
-  distance_meters: number;
-  distance_display: string;
-  hourly_rate: string;
-  fare_description: string;
-}
-
-interface ScheduleItem {
+export interface ScheduleNode {
   spot_order: number;
   spot_name: string;
   lat: number;
   lng: number;
   suggested_stay_minutes: number;
+  arrival_time: string;
+  departure_time: string;
+  open_time: string;
+  close_time: string;
   reason: string;
-  candidate_parkings: ParkingItem[];
+  source: string;
+  confidence: string;
+  parking_arrival_time: string;
+  walk_minutes_to_spot: number;
+  candidate_parkings: Array<{
+    parking_id: string;
+    name: string;
+    lat: number;
+    lng: number;
+    total_spaces: number;
+    available_spaces: number | null;
+    distance_meters: number;
+    distance_display: string;
+    hourly_rate: string;
+    fare_description: string;
+  }>;
 }
 
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   itineraryFlow: string;
-  schedule: ScheduleItem[];
+  hasConflicts?: boolean;
+  conflictLogs?: string[];
+  schedule: ScheduleNode[];
 }
 
-export default function TripParkingModal({ isOpen, onClose, schedule }: ModalProps) {
+export default function TripParkingModal({
+  isOpen,
+  onClose,
+  hasConflicts = false,
+  conflictLogs = [],
+  schedule,
+}: ModalProps) {
   const [activeSpotIndex, setActiveSpotIndex] = useState(0);
   const [liveSpaces, setLiveSpaces] = useState<Record<string, number | null>>({});
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -98,37 +122,19 @@ export default function TripParkingModal({ isOpen, onClose, schedule }: ModalPro
 
   if (!isOpen) return null;
 
-  // 🎯 核心修復：智慧 Google Maps 導航
-  // 優先使用「清洗後的精準地標名稱」，避免水岸座標吸附到對岸錯誤道路
-  const handleSmartGoogleNav = (name: string, lat: number, lng: number) => {
+  const handleGoogleNav = (name: string, lat: number, lng: number) => {
     const cleaned = cleanParkingName(name);
-
-    // 若名稱具體（非泛稱），使用名稱搜尋導航，Google 會直接對位到真實停車場出入口
     if (cleaned && !cleaned.includes('路邊') && cleaned !== '停車場') {
       const query = encodeURIComponent(`${cleaned} 高雄`);
-      window.open(
-        `https://www.google.com/maps/dir/?api=1&destination=${query}&travelmode=driving`,
-        '_blank'
-      );
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${query}&travelmode=driving`, '_blank');
     } else {
-      // 泛稱或路邊車格則使用精準經緯度
-      window.open(
-        `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
-        '_blank'
-      );
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_blank');
     }
   };
 
-  // 額外提供：直接在地圖上查看 Google 地標（非導航模式）
-  const handleViewOnGoogleMaps = (name: string, lat: number, lng: number) => {
-    const cleaned = cleanParkingName(name);
-    const query = encodeURIComponent(`${cleaned} 高雄`);
-    window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank');
-  };
-
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 md:p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700 w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 md:p-6 overflow-y-auto">
+      <div className="bg-slate-900 border border-slate-700 w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh]">
         
         {/* 頂部 Header */}
         <div className="p-4 md:p-5 bg-slate-800/90 border-b border-slate-700 flex items-center justify-between">
@@ -137,22 +143,37 @@ export default function TripParkingModal({ isOpen, onClose, schedule }: ModalPro
               <Compass className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">智慧行程與停車相對位置導覽</h2>
-              <p className="text-xs text-slate-400 mt-0.5">即時車位狀態與景點周邊停車點</p>
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                可信任 AI 智慧行程與即時停車導覽
+                <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30">
+                  觀光署開放資料 + TDX 雙驗證
+                </span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">自駕完整流動：停車預留 ➔ 步行引導 ➔ 景點時間軸</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 transition"
-          >
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 transition">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* 推薦路線順序 */}
+        {/* 衝突警示橫幅（若有時間或營業衝突） */}
+        {hasConflicts && conflictLogs.length > 0 && (
+          <div className="bg-rose-950/40 border-b border-rose-500/30 px-6 py-2.5 flex items-start gap-2 text-xs text-rose-300">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <span className="font-bold">行程衝突檢查提示：</span>
+              {conflictLogs.map((log, i) => (
+                <div key={i} className="text-rose-200/90">• {log}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 行程推薦順序 (流水號) */}
         <div className="bg-indigo-950/40 border-b border-indigo-500/20 px-6 py-3 flex items-center gap-3 overflow-x-auto">
           <span className="text-xs font-semibold px-2.5 py-1 rounded bg-indigo-500 text-white shrink-0">
-            推薦順序
+            行程站點
           </span>
           <div className="flex items-center gap-2 text-sm text-indigo-200 font-medium whitespace-nowrap">
             {schedule.map((spot, idx) => (
@@ -179,41 +200,63 @@ export default function TripParkingModal({ isOpen, onClose, schedule }: ModalPro
         {/* 內容區塊 */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-slate-900/50">
           
-          {/* 目前站點資訊 */}
-          <div className="flex flex-wrap items-center justify-between bg-slate-800/80 p-4 rounded-xl border border-slate-700 gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 font-bold flex items-center justify-center border border-rose-500/30">
-                <MapPin className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-rose-400">目前站點 #{currentSpot.spot_order}</span>
-                  <h3 className="text-lg font-bold text-white">{currentSpot.spot_name}</h3>
+          {/* 目前站點時間軸與可信度資訊 */}
+          <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 font-bold flex items-center justify-center border border-rose-500/30">
+                  <MapPin className="w-5 h-5" />
                 </div>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  建議停留：{currentSpot.suggested_stay_minutes} 分鐘 • {currentSpot.reason}
-                </p>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-rose-400">站點 #{currentSpot.spot_order}</span>
+                    <h3 className="text-lg font-bold text-white">{currentSpot.spot_name}</h3>
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> 可信度：{currentSpot.confidence}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    推薦理由：{currentSpot.reason}（來源：{currentSpot.source}）
+                  </p>
+                </div>
+              </div>
+
+              {/* 即時更新按鈕 */}
+              <div className="flex items-center gap-3">
+                {lastUpdateTime && (
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    即時車位更新：{lastUpdateTime}
+                  </span>
+                )}
+                <button
+                  onClick={fetchRealtimeSpaces}
+                  disabled={isRefreshing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 active:scale-95 text-xs text-slate-200 rounded-lg transition disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-400' : ''}`} />
+                  {isRefreshing ? '更新中...' : '重新整理車位'}
+                </button>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              {lastUpdateTime && (
-                <span className="text-[11px] text-slate-400 font-mono">
-                  即時更新：{lastUpdateTime}
-                </span>
-              )}
-              <button
-                onClick={fetchRealtimeSpaces}
-                disabled={isRefreshing}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 active:scale-95 text-xs text-slate-200 rounded-lg transition disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-400' : ''}`} />
-                {isRefreshing ? '更新中...' : '重新整理車位'}
-              </button>
+            {/* 時間流動：停車 ➔ 步行 ➔ 景點時間軸 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-700/60 text-xs">
+              <div className="flex items-center gap-2 text-slate-300 bg-slate-900/40 p-2 rounded-lg">
+                <Car className="w-4 h-4 text-amber-400" />
+                <span>預計抵達停車場：<b className="text-amber-300">{currentSpot.parking_arrival_time}</b></span>
+              </div>
+              <div className="flex items-center gap-2 text-slate-300 bg-slate-900/40 p-2 rounded-lg">
+                <Footprints className="w-4 h-4 text-indigo-400" />
+                <span>步行至景點：約 <b className="text-indigo-300">{currentSpot.walk_minutes_to_spot} 分鐘</b></span>
+              </div>
+              <div className="flex items-center gap-2 text-slate-300 bg-slate-900/40 p-2 rounded-lg">
+                <Clock className="w-4 h-4 text-emerald-400" />
+                <span>景點參觀時段：<b className="text-emerald-300">{currentSpot.arrival_time} ~ {currentSpot.departure_time}</b> ({currentSpot.suggested_stay_minutes}分)</span>
+              </div>
             </div>
           </div>
 
-          {/* 候選停車場卡片列表 */}
+          {/* 停車場卡片列表 */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {currentSpot.candidate_parkings.map((parking, pIdx) => {
               const displayName = cleanParkingName(parking.name);
@@ -238,13 +281,12 @@ export default function TripParkingModal({ isOpen, onClose, schedule }: ModalPro
                       parkingLng={parking.lng}
                     />
 
-                    {/* 圖例標籤 */}
                     <div className="absolute top-2 left-2 right-2 flex justify-between items-center pointer-events-none z-[400]">
                       <span className="bg-slate-900/90 backdrop-blur-md text-rose-400 text-[10px] px-2 py-0.5 rounded border border-rose-500/30 flex items-center gap-1 font-bold">
                         🔴 {currentSpot.spot_name}
                       </span>
                       <span className="bg-slate-900/90 backdrop-blur-md text-blue-400 text-[10px] px-2 py-0.5 rounded border border-blue-500/30 flex items-center gap-1 font-bold">
-                        🔵 推薦 {pIdx + 1}
+                        🔵 停車推薦 {pIdx + 1}
                       </span>
                     </div>
 
@@ -257,17 +299,13 @@ export default function TripParkingModal({ isOpen, onClose, schedule }: ModalPro
                   {/* 卡片本體資訊 */}
                   <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
                     <div>
-                      <div className="flex items-center justify-between gap-1">
-                        <h4 className="font-bold text-white text-base truncate" title={displayName}>
-                          {displayName}
-                        </h4>
-                        <button
-                          onClick={() => handleViewOnGoogleMaps(displayName, parking.lat, parking.lng)}
-                          title="在 Google Maps 查看地標"
-                          className="text-slate-400 hover:text-indigo-400 transition shrink-0 p-1"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </button>
+                      <h4 className="font-bold text-white text-base truncate" title={displayName}>
+                        {displayName}
+                      </h4>
+
+                      <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded text-[11px] text-amber-200/90 flex items-start gap-1.5 leading-tight">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                        <span>資料取自 TDX 即時端點，車況有時差僅供參考。</span>
                       </div>
 
                       {/* 車位資訊 */}
@@ -297,11 +335,13 @@ export default function TripParkingModal({ isOpen, onClose, schedule }: ModalPro
                         </div>
                       </div>
 
-                      {/* 費率與時段 */}
+                      {/* 費率 */}
                       <div className="mt-3 text-xs space-y-1.5 text-slate-300">
                         <div className="flex justify-between">
-                          <span className="text-slate-400">收費說明:</span>
-                          <span className="font-medium text-slate-200">{parking.fare_description}</span>
+                          <span className="text-slate-400">收費時段:</span>
+                          <span className="font-medium text-slate-200 truncate max-w-[170px]">
+                            {parking.fare_description}
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">收費費率:</span>
@@ -312,10 +352,10 @@ export default function TripParkingModal({ isOpen, onClose, schedule }: ModalPro
                       </div>
                     </div>
 
-                    {/* Google 導航專用按鈕 */}
+                    {/* Google 導航按鈕 */}
                     <div className="pt-3 border-t border-slate-700/60">
                       <button
-                        onClick={() => handleSmartGoogleNav(displayName, parking.lat, parking.lng)}
+                        onClick={() => handleGoogleNav(displayName, parking.lat, parking.lng)}
                         className="w-full py-2.5 px-4 bg-amber-800/80 hover:bg-amber-700 active:scale-95 text-amber-100 text-sm font-semibold rounded-lg flex items-center justify-center gap-2 transition shadow-md"
                       >
                         <Navigation className="w-4 h-4 text-amber-300" />
