@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 
 import { confidenceLabel, sourceLabel } from './scheduleLabels';
+import { availabilityLabel, availabilityStatus } from './availabilityLabel';
 
 const RelativeMiniMap = dynamic(() => import('./RelativeMiniMap'), {
   ssr: false,
@@ -343,14 +344,14 @@ export default function TripParkingModal({
                           </div>
                           <div
                             className={`text-base font-bold ${
-                              currentAvailable === 0
+                              availabilityStatus(currentAvailable) === 'full'
                                 ? 'text-rose-400'
-                                : currentAvailable !== null
+                                : availabilityStatus(currentAvailable) === 'available'
                                 ? 'text-emerald-400'
                                 : 'text-slate-400'
                             }`}
                           >
-                            {currentAvailable !== null ? `${currentAvailable} 格` : '尚無動態'}
+                            {availabilityLabel(currentAvailable)}
                           </div>
                         </div>
                         <div className="border-l border-slate-700">

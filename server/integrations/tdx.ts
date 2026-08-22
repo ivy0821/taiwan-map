@@ -31,6 +31,7 @@
 //  （編碼後約 4.7KB URL）仍正常。
 
 import { config } from '@/server/config';
+import { normalizeAvailableSpaces } from '@/server/types/parking';
 
 const TDX_HOST = 'https://tdx.transportdata.tw';
 const TDX_AUTH_URL = `${TDX_HOST}/auth/realms/TDXConnect/protocol/openid-connect/token`;
@@ -55,7 +56,14 @@ const MAX_ID_LENGTH = 64;
 
 export interface ParkingAvailability {
   carParkId: string;
-  /** TDX 回 -1 代表「該場無即時資料」，這裡原樣保留，不自行改寫語意 */
+  /**
+   * 已知的剩餘車位數；`null` 代表「未知 / 無有效即時資料」。
+   *
+   * P1-1：TDX 用 `AvailableSpaces = -1` 表示該場無即時資料。
+   * 這裡就是 external → application 的正規化邊界，-1 在離開這個模組前
+   * 已由 normalizeAvailableSpaces() 轉成 null，不會污染後面任何一層。
+   * 0 是「已知沒有空位」，會原樣保留，不會被當成未知。
+   */
   availableSpaces: number | null;
   totalSpaces: number | null;
   serviceStatus: number | null;
@@ -302,7 +310,8 @@ export async function getParkingAvailability(
       if (typeof record.CarParkID !== 'string' || record.CarParkID === '') continue;
       availabilities.set(record.CarParkID, {
         carParkId: record.CarParkID,
-        availableSpaces: toNullableNumber(record.AvailableSpaces),
+        // P1-1：TDX 的 -1 哨兵在這裡就轉成 null，不往下傳
+        availableSpaces: normalizeAvailableSpaces(toNullableNumber(record.AvailableSpaces)),
         totalSpaces: toNullableNumber(record.TotalSpaces),
         serviceStatus: toNullableNumber(record.ServiceStatus),
         dataCollectTime:

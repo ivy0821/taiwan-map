@@ -7,6 +7,7 @@
 import type { PoolClient } from 'pg';
 import { getPool } from '@/server/db/pool';
 import type { FindNearbyParkingParams, NearbyParking } from '@/server/types/parking';
+import { normalizeAvailableSpaces } from '@/server/types/parking';
 
 /** 表名是模組內常數，永遠不接受 runtime 輸入 */
 const PARKING_TABLE = 'parking_lots_cache';
@@ -65,5 +66,12 @@ export async function findNearbyParking(
     limit,
   ]);
 
-  return rows;
+  // P1-1：persistence → application 的正規化邊界。
+  // parking_lots_cache.available_spaces 的欄位 DEFAULT 就是 -1（「無即時資料」），
+  // 這裡把它轉成 null，讓 -1 不會以「負數車位」的形式流進 service 與 API。
+  // DB 欄位本身維持 -1 不動（這一輪不做 migration）。
+  return rows.map((row) => ({
+    ...row,
+    available_spaces: normalizeAvailableSpaces(row.available_spaces),
+  }));
 }

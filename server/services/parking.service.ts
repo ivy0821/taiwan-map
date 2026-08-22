@@ -48,12 +48,19 @@ export function walkingMinutesFor(distanceMeters: number): number {
   return Math.ceil(distanceMeters / WALKING_SPEED_M_PER_MIN);
 }
 
-/** 把一筆 DB 快取資料與（可能有的）即時車位合併成對外的候選停車場 */
+/**
+ * 把一筆 DB 快取資料與（可能有的）即時車位合併成對外的候選停車場。
+ *
+ * 這裡收到的兩個車位數都【已經】在各自的邊界正規化過（TDX 在 integration、
+ * DB 在 repository），所以 `null` 一律是「未知」，不會是 -1。
+ */
 export function toCandidateParking(
   parking: NearbyParking,
   liveAvailableSpaces: number | null | undefined
 ): CandidateParking {
-  // 即時車位有值就覆蓋快取值，沒有就沿用快取（既有 fallback 行為）
+  // 即時車位「已知」就覆蓋快取值，未知（null／該場沒回報 undefined）才沿用快取。
+  // 刻意用明確的 null / undefined 比較而不是 truthiness ——
+  // `0` 是「已知沒有空位」，必須被當成有效值保留下來。
   const availableSpaces =
     liveAvailableSpaces !== null && liveAvailableSpaces !== undefined
       ? liveAvailableSpaces

@@ -74,8 +74,9 @@
         "⚠ TDX 每分鐘只允許 5 次請求。若短時間內重複執行 contract，這一條會因為 429 而",
         "   回 200 + 空 availabilities，進而被 requireNonEmpty 判為 FAIL —— 那是額度問題，",
         "   等一分鐘再跑即可。",
-        "TDX 對「無即時資料」的停車場會回 AvailableSpaces = -1，後端原樣傳遞不改寫語意，",
-        "   所以值域是 number|null 且可能為負數。"
+        "P1-1：TDX 對「無即時資料」的停車場會回 AvailableSpaces = -1，後端已在 integration",
+        "   邊界把它正規化成 null，所以對外值域是 number|null 且【不會出現負數】。",
+        "   null = 未知；0 = 已知沒有空位。兩者語意不同，不可互換。"
       ]
     },
     {
