@@ -7,6 +7,7 @@ import {
   ValidationError,
 } from '@/server/api/validation';
 import { logServerError } from '@/server/api/errors';
+import { formatTaipeiClockTime } from '@/server/api/time';
 
 export async function POST(req: Request) {
   try {
@@ -27,7 +28,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       availabilities,
-      updated_at: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
+      // M1：明確指定台灣時區，不依賴部署環境的 OS / container 時區
+      updated_at: formatTaipeiClockTime(),
     });
   } catch (error: unknown) {
     if (error instanceof ValidationError) {
