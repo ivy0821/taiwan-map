@@ -27,6 +27,20 @@ export const config = {
   get geminiApiKey(): string {
     return requireEnv('GEMINI_API_KEY');
   },
+
+  /**
+   * 允許跨來源存取的前端網址，例如 http://localhost:5173。
+   *
+   * 這裡刻意【不】用 requireEnv：CORS 不是 API 運作的必要條件，
+   * 沒設定時應該是「不開放跨來源」而不是讓每個 API 請求都 500。
+   * 回 null 代表不開放，絕不退回 `*`。
+   */
+  get frontendOrigin(): string | null {
+    const value = process.env.FRONTEND_ORIGIN;
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  },
 };
 
 /**

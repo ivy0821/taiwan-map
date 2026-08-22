@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# 範本檔不含任何真實值，需要進版控讓其他人知道要設哪些變數
+!.env.example
 
 # vercel
 .vercel
